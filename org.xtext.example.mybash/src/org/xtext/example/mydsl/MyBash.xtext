@@ -1,0 +1,379 @@
+grammar org.xtext.example.mydsl.MyBash hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE)
+
+import "http://www.eclipse.org/emf/2002/Ecore" as ecore
+generate myBash "http://www.xtext.org/example/mydsl/MyBash"
+
+Bash:
+	{Bash} MaybeNewLine (commands+=SimpleList (NewLine commands+=SimpleList)* MaybeNewLine)?
+	//
+	| WS (error?=Word | error?=Assignment) WS;
+
+CompoundList:
+	MaybeNewLine (commands+=SimpleList (NewLine commands+=SimpleList)* MaybeNewLine);
+
+SimpleList returns CommandUnit:
+	PipelineCommand ({SimpleList.left=current} ((op=('&&' | '||') MaybeNewLine) | op=('&' | ';')) right=PipelineCommand)*
+	(backend?='&' | ';')?;
+
+PipelineCommand returns CommandUnit:
+	{PipelineCommand} not?='!' pipeline=Pipeline
+	| Pipeline;
+
+Pipeline returns CommandUnit:
+	Command ({Pipeline.left=current} op=('|' | '|&') MaybeNewLine right=Command)*;
+
+Command returns CommandUnit:
+	FunctionDefine | SimpleCommand | ShellCommand redirects+=Redirection*;
+
+FunctionDefine:
+	{FunctionDefine} 'function' name=FunctionName ((-> '(' ')')? MaybeNewLine) body=ShellCommand
+	| {FunctionDefine} name=FunctionName ('(' ')' MaybeNewLine) body=ShellCommand;
+
+SimpleCommand:
+	assignments+=Assignment+ (command=CommandName (parameters+=Word | r+=Redirection)*)?
+	| command=CommandName (parameters+=(Word | LAssignment) | r+=Redirection)*
+	| r+=Redirection+;
+
+ShellCommand:
+	GroupCommand | IfStatement | WhileStatement | ForStatement | CaseStatement | Subshell | CondCommand |
+	ArithmeticCommand;
+
+GroupCommand:
+	{GroupCommand} '{' body=CompoundList '}';
+
+CondCommand returns CondCommand:
+	'[[' expression=CondOrAnd ']]';
+
+ArithmeticCommand:
+	'((' expression=Evaluation '))';
+
+Subshell:
+	'(' body=CompoundList ')';
+
+CommandName returns Word:
+	{CommandName} ref=[FunctionDefine|FunctionName] | Words;
+
+CaseStatement:
+	{CaseStatement}
+	'case' variable=Word MaybeNewLine 'in' MaybeNewLine
+	(patterns+=CasePattern
+	patterns+=CasePatternContinue*
+	((';;' | ';&' | ';;&') MaybeNewLine)?)?
+	'esac';
+
+CasePattern:
+	'('? condition=Pattern ')' body=CompoundList;
+
+CasePatternContinue returns CasePattern:
+	(follow=(';;' | ';&' | ';;&') MaybeNewLine) '('? condition=Pattern ')' body=CompoundList;
+
+Pattern:
+	parts+=Word ('|' parts+=Word)*;
+
+IfStatement:
+	{IfStatement}
+	'if' condition=CompoundList
+	'then' then=CompoundList
+	(elseIfBlock+=ElseIfBlock)*
+	('else' else=CompoundList)?
+	'fi';
+
+ElseIfBlock:
+	{ElseIfBlock} 'elif' condition=CompoundList 'then' then=CompoundList;
+
+ForStatement:
+	'for'
+	({ArithmeticForStatement}
+	'((' init=Evaluation? ';' condition=Evaluation? ';' step=Evaluation? '))'
+	(ListTerminator MaybeNewLine)?
+	|
+	{ForStatement}
+	variable=NAME 'in' (words+=Word)+ ListTerminator MaybeNewLine)
+	'do'
+	body=CompoundList
+	'done';
+
+WhileStatement:
+	'while' c=CompoundList 'do' d=CompoundList 'done';
+
+Redirection:
+	{Redirection} (I_NUMBER? op=('>&' | '>' | '>>' | '<' | '<&' | '&>>' | '<>' | '&>' | '<|' | '>|') (target=Word |
+	I_NUMBER)
+	| op='<<' HERE_DOC_WORD);
+
+	//###########################################################################
+Array:
+	ArrayStart ArrayEnd;
+
+ArrayStart returns Array hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	{Array} '(' (MaybeNewLine words+=Word)* MaybeNewLine;
+
+ArrayEnd hidden(C_LINE):
+	')';
+
+Word returns Word:
+	Words | elements+=LiteralWord;
+
+LiteralWord returns Literal:
+	{Literal} values+=S_WORD_PART;
+
+Assignment hidden(C_LINE):
+	name=NAME index=IndexEvaluation? '=' -> value=Assignable?;
+
+LAssignment hidden(C_LINE):
+	name=NAME index=IndexEvaluation? ('=' -> value=Assignable)?;
+
+Assignable:
+	Word | Array;
+
+Words returns Word hidden(C_LINE):
+	-> elements+=WordElement+;
+
+DQString returns DQString:
+	{DQString} '"' elements+=StringElement* '"';
+
+Expansion returns Expansion:
+	ParameterExpansion | CommandSubstitution | ArithmeticExpansion | ProcessSubstitution;
+
+WordElement returns WordElement:
+	=> LiteralWordPart | DQString | Expansion;
+
+StringElement returns WordElement:
+	LiteralStringPart | Expansion;
+
+LiteralStringPart returns Literal:
+	{Literal} => values+=WORD_PART+;
+
+LiteralWordPart returns Literal:
+	{Literal} => (values+=WORD_PART | '\'' values+=WORD_PART? '\'' | '"' values+=WORD_PART* '"')+;
+
+	//###########################################################################
+CondOrAnd returns CondExpression:
+	CondExp ({CondUnaryExpression.left=current} ('||' | '&&') right=CondExp)*;
+
+CondExp returns CondExpression:
+	{CondUnaryExpression} op=C_S_OP operand=Word | CondConst ({CondBinaryExpression.left=current} ((op=C_B_OP
+	right=Word) | (op='=~' right=RegularExpression)))? | '(' CondOrAnd ')';
+
+CondConst:
+	value=Word;
+
+RegularExpression hidden(C_LINE):
+	RegularElements ({RegularExpression.left=current} op='|' right=RegularElements)*;
+
+RegularElements returns RegularConst:
+	{RegularConst} ('(' parts+=Word? ')' | parts+=Word)+;
+
+	//#################################################################################
+ArithmeticExpansion returns ArithmeticExpansion:
+	ArithmeticExpansionStart ArithmeticExpansionEnd;
+
+IndexEvaluation:
+	IndexEvaluationStart end=IndexEvaluationEnd;
+
+IndexEvaluationStart returns IndexEvaluation hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	'[' expression=Evaluation;
+
+IndexEvaluationEnd hidden(C_LINE):
+	']';
+
+ArithmeticExpansionStart returns ArithmeticExpansion hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	('$((') expression=Evaluation;
+
+ArithmeticExpansionEnd hidden(C_LINE):
+	'))';
+
+ParameterExpansion:
+	ParameterExpansionStart end=ParameterExpansionEnd
+	| {ParameterExpansion} ref=[Assignment|VARIABLE];
+
+ParameterExpansionStart returns ParameterExpansion hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	{ParameterExpansion}
+	'${'
+	hash?='#'?
+	(ref=[Assignment|NAME] | value=I_NUMBER | value='?' | value='@' | value='*')
+	('[' ('@' | '*' | index=Evaluation) ']')?
+	replacer=ParameterProcessor?;
+
+ParameterExpansionEnd hidden(C_LINE):
+	'}';
+
+ParameterProcessor:
+	{SingleProcessor} op=FollowWordOp word=Word?
+	| {ReplaceProcessor} op=('//' | '/') (original=Word ('/' replace=Word?)?)?
+	| {ReplaceProcessor} op=('//' | '/') '/' replace=Word?
+	| {SubStringProcessor} ':' (start=Evaluation (':' length=Evaluation?)?)?
+	| {SubStringProcessor} ':' ':' length=Evaluation?;
+
+enum FollowWordOp:
+	GreedyRemoveSuffix='%%' | RemoveSuffix='%'
+	| GreeyRemovePrefix='##' | RemovePrefix='#'
+	| GreedyLowercase=',,' | Lowercase=','
+	| GreedyUppercase='^^' | Uppercase='^'
+	| UseAlternate=':+' | UseAlternate='+'
+	| UseDefault=':-' | UseDefault='-'
+	| AssignDefault=':=' | AssignDefault='='
+	| ErrorDefault=':?' | ErrorDefault='?';
+
+CommandSubstitution returns CommandSubstitution:
+	CommandSubstitutionStart end=CommandSubstitutionStartEnd;
+
+CommandSubstitutionStart returns CommandSubstitution hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	CS_START commands=CompoundList;
+
+CommandSubstitutionStartEnd hidden(C_LINE):
+	CS_END;
+
+ProcessSubstitution:
+	ProcessSubstitutionStart end=ProcessSubstitutionEnd;
+
+ProcessSubstitutionStart returns ProcessSubstitution hidden(SL_COMMENT, C_LINE, WS, HIDEN_NEW_LINE):
+	op=('<(' | '>(') body=CompoundList;
+
+ProcessSubstitutionEnd hidden(C_LINE):
+	')';
+	//###########################################################################
+Evaluation returns Expression:
+	Arithmetic ({BinaryExpression.left=current} op=',' right=Arithmetic)*;
+
+Arithmetic returns Expression:
+	{BinaryExpression} left=VariableId op=('=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|=')
+	right=Arithmetic | ConditionalOperator;
+
+ConditionalOperator returns Expression:
+	LogicOr ('?' {ConditionalOperator.condition=current} first=ConditionalOperator ':' right=ConditionalOperator)?;
+
+LogicOr returns Expression:
+	LogicAnd ({BinaryExpression.left=current} op='||' right=LogicAnd)*;
+
+LogicAnd returns Expression:
+	BitwiseOR ({BinaryExpression.left=current} op='&&' right=BitwiseOR)*;
+
+BitwiseOR returns Expression:
+	BitwiseExclusiveOR ({BinaryExpression.left=current} op='|' right=BitwiseExclusiveOR)*;
+
+BitwiseExclusiveOR returns Expression:
+	BitwiseAND ({BinaryExpression.left=current} op='^' right=BitwiseAND)*;
+
+BitwiseAND returns Expression:
+	EqualityAndInequality ({BinaryExpression.left=current} op='&' right=EqualityAndInequality)*;
+
+EqualityAndInequality returns Expression:
+	Comparison ({BinaryExpression.left=current} op=('==' | '!=') right=Comparison)*;
+
+Comparison returns Expression:
+	BitwiseShifts ({BinaryExpression.left=current} op=('<=' | '>=' | '<' | '>') right=BitwiseShifts)*;
+
+BitwiseShifts returns Expression:
+	AdditionSubtraction ({BinaryExpression.left=current} op=('<<' | '>>') right=AdditionSubtraction)*;
+
+AdditionSubtraction returns Expression:
+	MultiplicationDivisionRemainder ({BinaryExpression.left=current} op=('+' | '-')
+	right=MultiplicationDivisionRemainder)*;
+
+MultiplicationDivisionRemainder returns Expression:
+	Exponentiation ({BinaryExpression.left=current} op=('*' | '/' | '%') right=Exponentiation)*;
+
+Exponentiation returns Expression:
+	LogicalAndBitwiseNegation ({BinaryExpression.left=current} op=('**') right=Exponentiation)?;
+
+LogicalAndBitwiseNegation returns Expression:
+	{PrefixExpression} op=('!' | '~') operand=LogicalAndBitwiseNegation | UnaryMinusAndPlus;
+
+UnaryMinusAndPlus returns Expression:
+	{PrefixExpression} op=('+' | '-') operand=UnaryMinusAndPlus | PrimaryItem;
+
+PreDecrement returns Expression:
+	{PrefixExpression} op=('++' | '--') operand=PostDecrement | PostDecrement;
+
+PostDecrement returns Expression:
+	VariableId ({SuffixExpression.operand=current} op=('++' | '--'))?;
+
+PrimaryItem returns Expression:
+	{ConstPrimaryItem} prefix=A_PREFIX? value=I_NUMBER | '(' Evaluation ')' | {PrimaryItem} prefix=A_PREFIX?
+	value=Expansion | PreDecrement;
+
+VariableId:
+	{VariableId} ref=[Assignment|NAME];
+
+	//Data type tokens
+//############################################################################
+FunctionName:
+	S_WORD_PART;
+
+NewLine:
+	HereDoc* NEW_LINE;
+
+ListTerminator:
+	NewLine | ';';
+
+MaybeNewLine:
+	NewLine?;
+
+HereDoc:
+	HERE_DOC_START (HERE_DOC_PART | NEW_LINE)* HERE_DOC_END;
+
+	//################################Terminal tokens
+terminal I_NUMBER:
+	('0'..'9')+;
+
+terminal NEW_LINE:
+	('\r'? '\n');
+
+terminal WS:
+	(' ' | '\t');
+
+	//#####################
+terminal HIDEN_NEW_LINE:
+	'__HIDEN_NEW_LINE__';
+
+terminal NAME:
+	'__NAME__';
+
+terminal S_WORD_PART:
+	'__S_WORD_PART__';
+
+terminal WORD_PART:
+	'__WORD_PART__';
+
+terminal SL_COMMENT:
+	'__SL_COMMENT__';
+
+terminal VARIABLE:
+	'__VARIABLE__';
+
+terminal A_PREFIX:
+	'__A_PREFIX__';
+
+terminal C_S_OP:
+	'__C_S_OP__';
+
+terminal C_B_OP:
+	'__C_B_OP__';
+
+terminal C_LINE:
+	'__C_LINE__';
+
+terminal CS_START:
+	'__CS_START__';
+
+terminal CS_END:
+	'__CS_END__';
+	//##############################################
+terminal HERE_DOC_WORD:
+	'__HERE_DOC_WORD__';
+
+terminal HERE_DOC_START:
+	'__HERE_DOC_START__';
+
+terminal HERE_DOC_END:
+	'__HERE_DOC_END__';
+
+terminal HERE_DOC_PART:
+	'__HERE_DOC_PART__';
+
+
+
+
+
+
