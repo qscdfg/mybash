@@ -14,7 +14,10 @@ import java.util.Stack;
 
 import org.antlr.runtime.CommonToken;
 import org.antlr.runtime.Token;
+import org.xtext.example.mydsl.lexer.model.HeredocState;
 import org.xtext.example.mydsl.lexer.model.Word;
+
+import com.google.common.base.Strings;
 
 public abstract class MyBashLexerBase {
 
@@ -24,42 +27,6 @@ public abstract class MyBashLexerBase {
 	protected BashLexerState currentLexerState = new BashLexerState(this);
 
 	private Token nextToken = null;
-	private Token nextToken2 = null;
-
-	public class RealWord extends Word {
-		private int startIndex = -1;
-		private int length = 0;
-		private StringBuilder build = new StringBuilder();
-
-		public RealWord() {
-			super();
-		}
-
-		@Override
-		public void appendWordPart() {
-			super.appendWordPart();
-			if (startIndex == -1) {
-				startIndex = getCharIndex();
-			}
-			length += yylength();
-			build.append(yytext());
-		}
-
-		@Override
-		public void endWord() {
-			super.endWord();
-			currentLexerState.hereDocQueue.add(build.toString());
-		}
-
-		public Token getToken() {
-			return newToken(RULE_HERE_DOC_WORD, build.toString(), startIndex, startIndex + length - 1);
-		}
-
-	}
-
-	public void setNextWord(Word nextWord) {
-		currentLexerState.nextWord = nextWord;
-	}
 
 	public Token nextToken() {
 		try {
@@ -68,25 +35,15 @@ public abstract class MyBashLexerBase {
 				token = nextToken;
 				nextToken = null;
 			}
-			if (nextToken2 != null) {
-				token = nextToken2;
-				nextToken2 = null;
-			}
-			RealWord lastWord = null;
-			while (token == null) {
-				Token currentToken = yylex();
-				Word currentWord = currentLexerState.currentWord;
-				if (currentWord != null && currentWord instanceof RealWord) {
-					lastWord = (RealWord) currentWord;
-				} else if (lastWord != null && currentWord == null) {
-					token = lastWord.getToken();
-					lastWord = null;
-					nextToken = currentToken;
-				} else {
-					token = currentToken;
-				}
-			}
 
+			while (token == null) {
+				token = yylex();
+			}
+			//if (token.getText() != null) {
+			//	System.out.println("[" + token.getType() + "]["
+			//			+ org.eclipse.xtext.util.Strings.convertToJavaString(token.getText(), false) + "][s="
+			//			+ ((CommonToken) token).getStartIndex() + "][e=" + ((CommonToken) token).getStopIndex() + "]");
+			//}
 			return token;
 		} catch (java.io.IOException e) {
 			System.err.println("shouldn't happen: " + e.getMessage());
@@ -108,6 +65,49 @@ public abstract class MyBashLexerBase {
 		return newToken(newType);
 	}
 
+	protected void appendHeredocWordPart() {
+		currentLexerState.appendHeredocWordPart();
+	}
+
+	protected void appendHeredocWordLength() {
+		currentLexerState.appendHeredocWordLength();
+	}
+
+	protected void quoteHeredocWord() {
+		if (currentLexerState.currentHeredocWord != null) {
+			currentLexerState.currentHeredocWord.setQuote(true);
+		}
+	}
+
+	protected Token hereDocWordSpace() {
+		if (currentLexerState.currentHeredocWord != null) {
+			popState();
+			nextToken = space();
+			return getHeredocWord();
+		} else {
+			return space();
+		}
+	}
+
+	protected Token hereDocPartLine() {
+		int newType = currentLexerState.newHereDocPartLine();
+		if (newType != -1) {
+			return newToken(newType);
+		}
+		return null;
+	}
+
+	protected Token getHeredocWord() {
+		if (currentLexerState.currentHeredocWord != null) {
+			Token token = currentLexerState.currentHeredocWord.createToken();
+			currentLexerState.hereDocQueue
+					.add(new HeredocState(token.getText(), currentLexerState.currentHeredocWord.isQuote()));
+			currentLexerState.currentHeredocWord = null;
+			return token;
+		}
+		return null;
+	}
+
 	protected Token hereDocNewLine() {
 		int newType = currentLexerState.newHereDocNewLine();
 		return newToken(newType);
@@ -125,6 +125,11 @@ public abstract class MyBashLexerBase {
 
 	protected Token newEof() {
 		currentLexerState.gotWordSplit();
+		if (currentLexerState.currentHeredocWord != null) {
+			Token token = currentLexerState.currentHeredocWord.createToken();
+			nextToken = Token.EOF_TOKEN;
+			return token;
+		}
 		return Token.EOF_TOKEN;
 	}
 
@@ -148,7 +153,6 @@ public abstract class MyBashLexerBase {
 
 	protected void exitSubShell() {
 		currentLexerState = lexerStateStack.pop();
-		// currentShell.reEnter();k
 	}
 
 	protected Token number(int type) {
@@ -320,6 +324,8 @@ public abstract class MyBashLexerBase {
 	protected abstract int yystate();
 
 	protected abstract void yybegin(int state);
+	
+	protected abstract void yypushback(int length);
 
 	protected abstract Token yylex() throws java.io.IOException;
 

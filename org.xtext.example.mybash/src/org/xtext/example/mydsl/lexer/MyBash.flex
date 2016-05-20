@@ -32,8 +32,10 @@ EscapedChar = "\\" [^\n\r]
 WordFirst = [[^]--[|&;()<> \t\r\n\\\$#\"\'`]] | {EscapedChar}
 WordAfter =  {WordFirst} | "#" 
 StringPart = {WordAfter} | {Metacharacter} | "=" | "\'" | {NewLine} 
-BStringPart = [[^]--[\\\$\"\'\}\/<>]]
-RStringPart = [[^]--[\\\$\"\'()]]
+BStringPart = [[^]--[\\\$\"\'\}\/<>`]]
+RStringPart = [[^]--[\\\$\"\'()`]]
+CStringPart = [[^]--[\\\$\"\'()`]]
+CPStringPart = [[^]--[\\\$\"\'()`)]]
 Word = {WordFirst}{WordAfter}*
 AssignmentWord = [a-zA-Z_][a-zA-Z0-9_]*
 Variable = "$" {AssignmentWord} | "$@" | "$$" | "$#" | "$"[0-9] | "$?" | "$!" | "$*" | "$-" | "$_"
@@ -67,6 +69,13 @@ IntegerLiteral = [0] | ([1-9][0-9]*)
 %state S_A_ARITH
 %state S_A_ARITH_S
 %state S_COMMENTS
+%state S_HERE_DOC_WORD
+%state S_HEREDOC_DQ
+%state S_HEREDOC_AE
+%state S_HEREDOC_CS
+%state S_HEREDOC_CS_P
+%state S_HEREDOC_PE
+%state S_HEREDOC_Q
 
 %%
 
@@ -203,7 +212,7 @@ IntegerLiteral = [0] | ([1-9][0-9]*)
 	
 	">&"									{ return operator( GreaterThanSignAmpersand ); }
 	"<&"									{ return operator( LessThanSignAmpersand ); }
-	"<<"									{ Token token = operator( LessThanSignLessThanSign ); setNextWord(new RealWord()); return token; }
+	"<<"									{ pushState(S_HERE_DOC_WORD); return operator( LessThanSignLessThanSign );  }
 	">>"									{ return operator( GreaterThanSignGreaterThanSign ); }
 	"<>"									{ return operator( LessThanSignGreaterThanSign ); }
 	">|"									{ return operator( GreaterThanSignVerticalLine ); }
@@ -222,8 +231,9 @@ IntegerLiteral = [0] | ([1-9][0-9]*)
 		">("								{ pushState(S_CS_P); enterSubShell(); return wordPart( GreaterThanSignLeftParenthesis ); }	
 		"<("								{ pushState(S_CS_P); enterSubShell(); return wordPart( LessThanSignLeftParenthesis ); }	
 	}
-	<S_DQ_STRING , S_B_STRING, S_ARITH, S_A_ARITH, S_FOR_ARITH, S_B_ARITH, S_ARITH_P, S_COND, S_COND_P, S_REGULAR, S_REGULAR_P, S_ARRAY> {
+	<S_DQ_STRING , S_B_STRING, S_ARITH, S_A_ARITH, S_FOR_ARITH, S_B_ARITH, S_ARITH_P, S_COND, S_COND_P, S_REGULAR, S_REGULAR_P, S_ARRAY, S_HERE_DOC_E> {
 		{Variable}							{ return wordPart( RULE_VARIABLE ); }	
+		
 		"${"								{ pushState(S_PE_START); enterSubShell(); return wordPart( DollarSignLeftCurlyBracket ); }
 		"$("								{ pushState(S_CS_D); Token token = wordPart( RULE_CS_START ); enterSubShell(); return token; }	
 		"`"									{ pushState(S_CS); Token token = wordPart( RULE_CS_START ); enterSubShell(); return token; }
@@ -398,9 +408,81 @@ IntegerLiteral = [0] | ([1-9][0-9]*)
 }
 
 <S_HERE_DOC> {
-	[^\r\n]+								{ return hereDocPart(); }
+	[^\r\n]+								{ return hereDocPartLine(); }
 	{NewLine}								{ return hereDocNewLine(); }
 }
+
+<S_HERE_DOC_E> {
+	[^\r\n$`]+								{ return hereDocPart(); }
+	"$"										{ return hereDocPart(); }	
+	{NewLine}								{ popState(); return hereDocNewLine(); }
+}
+
+
+<S_HERE_DOC_WORD> {
+	{Space}									{ return hereDocWordSpace(); }	
+	
+	<S_HEREDOC_DQ, S_HEREDOC_AE, S_HEREDOC_CS, S_HEREDOC_CS_P, S_HEREDOC_PE> {
+		"${"								{ pushState(S_HEREDOC_PE); appendHeredocWordPart(); }
+		"$("								{ pushState(S_HEREDOC_CS_P); appendHeredocWordPart(); }	
+		"`"									{ pushState(S_HEREDOC_CS); appendHeredocWordPart(); }
+		"$(("								{ pushState(S_HEREDOC_AE); appendHeredocWordPart(); }
+	}
+	
+	"\""									{ pushState(S_HEREDOC_DQ); appendHeredocWordLength(); quoteHeredocWord(); }		
+	\' 										{ pushState(S_HEREDOC_Q); appendHeredocWordLength(); quoteHeredocWord(); }	
+	
+	
+	"$"										{ appendHeredocWordPart();}
+	{Word}									{ appendHeredocWordPart();}
+	[|&;()<>] | {NewLine}					{ popState(); yypushback(yylength()); return getHeredocWord(); }
+}
+
+<S_HEREDOC_AE, S_HEREDOC_CS, S_HEREDOC_CS_P, S_HEREDOC_PE> {
+	"\""									{ pushState(S_HEREDOC_DQ); appendHeredocWordLength(); }		
+	\' 										{ pushState(S_HEREDOC_Q);appendHeredocWordLength();}	
+}
+
+<S_HEREDOC_DQ> {
+	"\""									{ popState();  appendHeredocWordLength(); }
+	"$"										{ appendHeredocWordPart(); }	
+	{ContinuedLine}							{ }
+	{StringPart}+							{ appendHeredocWordPart(); }	
+}
+
+<S_HEREDOC_Q> {
+	[^\']+									{ appendHeredocWordPart(); }
+	\' 										{ popState(); appendHeredocWordLength(); }
+}
+
+<S_HEREDOC_PE> {
+	"}"										{ popState();  appendHeredocWordPart(); }
+	"$"										{ appendHeredocWordPart(); }	
+	{ContinuedLine}							{ }
+	{BStringPart}+							{ appendHeredocWordPart(); }
+}
+
+<S_HEREDOC_CS> {
+	"`"										{ popState();  appendHeredocWordPart(); }
+	"$"										{ appendHeredocWordPart(); }	
+	{ContinuedLine}							{ }
+	{CStringPart}+							{ appendHeredocWordPart(); }
+}
+
+<S_HEREDOC_CS_P> {
+	")"										{ popState();  appendHeredocWordPart(); }
+	"$"										{ appendHeredocWordPart(); }	
+	{ContinuedLine}							{ }
+	{CPStringPart}+							{ appendHeredocWordPart(); }
+}
+
+<S_HEREDOC_AE> {
+	"))"									{ popState();  /*12345*/ appendHeredocWordPart(); }
+	"$"										{ appendHeredocWordPart(); }	
+	{ContinuedLine}							{ }
+	{CPStringPart}+							{ appendHeredocWordPart(); }
+}
+
 
 [^]											{ return operator( INVALID_TOKEN_TYPE ); }
 

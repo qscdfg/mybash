@@ -12,15 +12,16 @@ CompoundList:
 	MaybeNewLine (commands+=SimpleList (NewLine commands+=SimpleList)* MaybeNewLine);
 
 SimpleList returns CommandUnit:
-	PipelineCommand ({SimpleList.left=current} ((op=('&&' | '||') MaybeNewLine) | op=('&' | ';')) right=PipelineCommand)*
-	(backend?='&' | ';')?;
+	PipelineCommand ({SimpleList.left=current} ((op=('&&' | '||') heredocs+=HereDoc* MaybeNewLine) | op=('&' | ';'))
+	right=PipelineCommand)*
+	(backend?='&' | ';')? heredocs+=HereDoc*;
 
 PipelineCommand returns CommandUnit:
 	{PipelineCommand} not?='!' pipeline=Pipeline
 	| Pipeline;
 
 Pipeline returns CommandUnit:
-	Command ({Pipeline.left=current} op=('|' | '|&') MaybeNewLine right=Command)*;
+	Command ({Pipeline.left=current} op=('|' | '|&') heredocs+=HereDoc* MaybeNewLine right=Command)*;
 
 Command returns CommandUnit:
 	FunctionDefine | SimpleCommand | ShellCommand redirects+=Redirection*;
@@ -302,7 +303,7 @@ FunctionName:
 	S_WORD_PART;
 
 NewLine:
-	HereDoc* NEW_LINE;
+	NEW_LINE;
 
 ListTerminator:
 	NewLine | ';';
@@ -311,7 +312,7 @@ MaybeNewLine:
 	NewLine?;
 
 HereDoc:
-	HERE_DOC_START (HERE_DOC_PART | NEW_LINE)* HERE_DOC_END;
+	{HereDoc} HERE_DOC_START (texts+=HERE_DOC_PART | texts+=NEW_LINE | expansions+=Expansion)* HERE_DOC_END;
 
 	//################################Terminal tokens
 terminal I_NUMBER:

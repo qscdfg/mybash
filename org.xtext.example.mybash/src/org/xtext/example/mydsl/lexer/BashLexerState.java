@@ -1,6 +1,6 @@
 package org.xtext.example.mydsl.lexer;
 
-import static org.xtext.example.mydsl.lexer.MyBashLexer.S_ARRAY;
+import static org.xtext.example.mydsl.lexer.MyBashLexer.*;
 import static org.xtext.example.mydsl.lexer.MyBashLexer.S_HERE_DOC;
 import static org.xtext.example.mydsl.parser.antlr.lexer.InternalMyBashLexer.Case;
 import static org.xtext.example.mydsl.parser.antlr.lexer.InternalMyBashLexer.EqualsSign;
@@ -26,6 +26,8 @@ import java.util.Queue;
 
 import org.xtext.example.mydsl.lexer.model.Command;
 import org.xtext.example.mydsl.lexer.model.ConditionExpression;
+import org.xtext.example.mydsl.lexer.model.HereDocWord;
+import org.xtext.example.mydsl.lexer.model.HeredocState;
 import org.xtext.example.mydsl.lexer.model.Word;
 
 public class BashLexerState {
@@ -34,10 +36,11 @@ public class BashLexerState {
 	public Word currentWord;
 	public Word nextWord;
 	public ConditionExpression currentConditionExpression;
+	public HereDocWord currentHeredocWord;
 
 	private int lastTokenType;
 	private int tokenBeforLastType;
-	protected Queue<String> hereDocQueue = new LinkedList<>();
+	protected Queue<HeredocState> hereDocQueue = new LinkedList<>();
 
 	private boolean hereDocEndFound = false;
 	private int lastNewLineType = RULE_NEW_LINE;
@@ -169,15 +172,25 @@ public class BashLexerState {
 				return RULE_HERE_DOC_START;
 			}
 		}
-		return lastNewLineType;
+		return newOperator(lastNewLineType, true);
 	}
 
 	public int newHereDocPart() {
-		String word = hereDocQueue.peek();
+		return RULE_HERE_DOC_PART;
+	}
+
+	public int newHereDocPartLine() {
+		HeredocState heredocState = hereDocQueue.peek();
 		String currentWord = lexer.yytext();
-		if (word.equals(currentWord)) {
+		if (heredocState.getText().equals(currentWord)) {
 			hereDocEndFound = true;
 			return RULE_HERE_DOC_END;
+		} else {
+			if (!heredocState.isQueto()) {
+				lexer.yypushback(lexer.yylength());
+				lexer.pushState(S_HERE_DOC_E);
+				return -1;
+			}
 		}
 		return RULE_HERE_DOC_PART;
 	}
@@ -214,7 +227,7 @@ public class BashLexerState {
 	public boolean canBeName(boolean followEqual) {
 		if (getCurrentCommand().canBeName(followEqual)) {
 			if (getCurrentWord().canBeName(followEqual)) {
-				if (!inCaseP) {					
+				if (!inCaseP) {
 					return true;
 				}
 			}
@@ -331,6 +344,22 @@ public class BashLexerState {
 	public int newAssignableWord(int ruleWordPart) {
 		getCurrentCommand().appendAssignable();
 		return ruleWordPart;
+	}
+
+	public void appendHeredocWordPart() {
+		getCurrentHeredocWord().append(lexer.yytext());
+		getCurrentHeredocWord().update(lexer.getCharIndex(), lexer.yylength());
+	}
+
+	public HereDocWord getCurrentHeredocWord() {
+		if (currentHeredocWord == null) {
+			currentHeredocWord = new HereDocWord();
+		}
+		return currentHeredocWord;
+	}
+
+	public void appendHeredocWordLength() {
+		getCurrentHeredocWord().update(lexer.getCharIndex(), lexer.yylength());
 	}
 
 }

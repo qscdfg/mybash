@@ -29,6 +29,7 @@
     </genClasses>
     <genClasses ecoreClass="MyBash.ecore#//CommandUnit">
       <genFeatures createChild="false" ecoreFeature="ecore:EAttribute MyBash.ecore#//CommandUnit/backend"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference MyBash.ecore#//CommandUnit/heredocs"/>
     </genClasses>
     <genClasses ecoreClass="MyBash.ecore#//FunctionDefine">
       <genFeatures createChild="false" ecoreFeature="ecore:EAttribute MyBash.ecore#//FunctionDefine/name"/>
@@ -155,6 +156,10 @@
     <genClasses ecoreClass="MyBash.ecore#//Expression"/>
     <genClasses ecoreClass="MyBash.ecore#//VariableId">
       <genFeatures notify="false" createChild="false" propertySortChoices="true" ecoreFeature="ecore:EReference MyBash.ecore#//VariableId/ref"/>
+    </genClasses>
+    <genClasses ecoreClass="MyBash.ecore#//HereDoc">
+      <genFeatures createChild="false" ecoreFeature="ecore:EAttribute MyBash.ecore#//HereDoc/texts"/>
+      <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference MyBash.ecore#//HereDoc/expansions"/>
     </genClasses>
     <genClasses ecoreClass="MyBash.ecore#//SimpleList">
       <genFeatures property="None" children="true" createChild="true" ecoreFeature="ecore:EReference MyBash.ecore#//SimpleList/left"/>
