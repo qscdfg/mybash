@@ -1,2 +1,2 @@
 # mybash
-Eclipse plugin for bash script based on xtext
+Eclipse plugin for bash script based on xtext1
